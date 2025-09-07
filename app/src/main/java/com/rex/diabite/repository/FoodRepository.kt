@@ -9,7 +9,6 @@ import com.rex.diabite.domain.FoodDecisionLogic
 import com.rex.diabite.model.FoodItem
 import com.rex.diabite.network.RetrofitClient
 import com.rex.diabite.util.Constants
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import com.rex.diabite.network.GeminiApi
 import com.rex.diabite.network.GeminiRequest
@@ -52,43 +51,38 @@ class FoodRepository private constructor(
         // Check history first
         val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType)
         if (existingHistoryItem != null) {
-            Log.d(TAG, "Found in history: $normalizedQuery. Checking cache.")
+            Log.d(TAG, "Found in history: ${existingHistoryItem.displayName}. Checking cache.")
             existingHistoryItem.matchedKey?.let { key ->
                 val cached = getCachedFood(key)
                 if (cached != null && isCacheValid(cached)) {
-                    Log.d(TAG, "Found valid cached food for history item: $normalizedQuery")
+                    Log.d(TAG, "Found valid cached food for history item: ${existingHistoryItem.displayName}")
                     val decision = decisionLogic.decideSuitability(cached, diabetesType)
-                    saveToHistory(normalizedQuery, diabetesType, key, decision) // Update timestamp
+                    saveToHistory(normalizedQuery, cached.name, key, decision)
                     return FoodResult.Success(cached, decision)
                 }
             }
         }
 
-        // Check cache first (for direct cache hits not necessarily from history)
         val cacheKey = "name:$normalizedQuery"
-        val cached = getCachedFood(cacheKey)
-        if (cached != null && isCacheValid(cached)) {
-            Log.d(TAG, "Found cached food for: $normalizedQuery")
-            val decision = decisionLogic.decideSuitability(cached, diabetesType)
-            saveToHistory(normalizedQuery, diabetesType, cacheKey, decision)
-            return FoodResult.Success(cached, decision)
+        val cachedFromDirectKey = getCachedFood(cacheKey) 
+        if (cachedFromDirectKey != null && isCacheValid(cachedFromDirectKey)) {
+            Log.d(TAG, "Found cached food for: ${cachedFromDirectKey.name}")
+            val decision = decisionLogic.decideSuitability(cachedFromDirectKey, diabetesType)
+            saveToHistory(normalizedQuery, cachedFromDirectKey.name, cacheKey, decision)
+            return FoodResult.Success(cachedFromDirectKey, decision)
         }
 
         // Try OFF search
         try {
             Log.d(TAG, "Trying OFF search for: $normalizedQuery")
             val response = offApi.searchProducts(normalizedQuery)
-            Log.d(TAG, "OFF response successful: ${response.isSuccessful}")
-
             if (response.isSuccessful && response.body() != null) {
                 val offResponse = response.body()!!
-                Log.d(TAG, "OFF raw response: $offResponse")
-
                 val firstProduct = offResponse.products?.firstOrNull()
-
                 if (firstProduct?.productName?.isNotBlank() == true) {
+                    val actualFoodName = firstProduct.productName
                     val foodItem = FoodItem(
-                        name = firstProduct.productName,
+                        name = actualFoodName,
                         brand = firstProduct.brands,
                         carbs100g = firstProduct.carbohydrates100g,
                         sugars100g = firstProduct.sugars100g,
@@ -97,11 +91,9 @@ class FoodRepository private constructor(
                         countryTags = firstProduct.countriesTagsEn,
                         source = "OFF"
                     )
-
-                    Log.d(TAG, "OFF food item created: ${foodItem.name}")
-                    cacheFood(cacheKey, foodItem)
+                    cacheFood(cacheKey, foodItem) 
                     val decision = decisionLogic.decideSuitability(foodItem, diabetesType)
-                    saveToHistory(normalizedQuery, diabetesType, cacheKey, decision)
+                    saveToHistory(normalizedQuery, actualFoodName, cacheKey, decision)
                     return FoodResult.Success(foodItem, decision)
                 }
             }
@@ -119,16 +111,17 @@ class FoodRepository private constructor(
                 if (detailsResponse.isSuccessful && detailsResponse.body() != null) {
                     val details = detailsResponse.body()!!
                     val nutrients = details.foodNutrients?.associate { it.nutrientId.toString() to it.value?.toFloat() } ?: emptyMap()
+                    val actualFoodName = details.description ?: query
                     val foodItem = FoodItem(
-                        name = details.description ?: normalizedQuery,
+                        name = actualFoodName,
                         carbs100g = nutrients["1005"],
                         sugars100g = nutrients["2000"],
                         fiber100g = nutrients["1079"],
                         source = "USDA"
                     )
-                    cacheFood(cacheKey, foodItem)
+                    cacheFood(cacheKey, foodItem) 
                     val decision = decisionLogic.decideSuitability(foodItem, diabetesType)
-                    saveToHistory(normalizedQuery, diabetesType, cacheKey, decision)
+                    saveToHistory(normalizedQuery, actualFoodName, cacheKey, decision)
                     return FoodResult.Success(foodItem, decision)
                 }
             }
@@ -136,8 +129,7 @@ class FoodRepository private constructor(
             Log.e(TAG, "USDA search exception: ${e.message}", e)
         }
 
-        // AI Fallback
-        return getAiFoodAnalysis(normalizedQuery, diabetesType)
+        return getAiFoodAnalysis(query, diabetesType) 
     }
 
     suspend fun getFoodByBarcode(
@@ -145,30 +137,30 @@ class FoodRepository private constructor(
         diabetesType: String,
         useStaging: Boolean = false
     ): FoodRepository.FoodResult {
-        Log.d(TAG, "Searching for barcode: $barcode")
+        val normalizedBarcode = barcode.lowercase().trim()
+        Log.d(TAG, "Searching for barcode: $normalizedBarcode")
 
-        // Check history first
-        val existingHistoryItem = database.historyDao().findHistoryItem(barcode.lowercase().trim(), diabetesType)
+        val existingHistoryItem = database.historyDao().findHistoryItem(normalizedBarcode, diabetesType)
         if (existingHistoryItem != null) {
-            Log.d(TAG, "Found in history: $barcode. Checking cache.")
+            Log.d(TAG, "Found in history: ${existingHistoryItem.displayName}. Checking cache.")
             existingHistoryItem.matchedKey?.let { key ->
                 val cached = getCachedFood(key)
                 if (cached != null && isCacheValid(cached)) {
-                    Log.d(TAG, "Found valid cached food for history item: $barcode")
+                    Log.d(TAG, "Found valid cached food for history item: ${existingHistoryItem.displayName}")
                     val decision = decisionLogic.decideSuitability(cached, diabetesType)
-                    saveToHistory(barcode, diabetesType, key, decision) // Update timestamp
+                    saveToHistory(normalizedBarcode, cached.name, key, decision)
                     return FoodResult.Success(cached, decision)
                 }
             }
         }
 
-        val cacheKey = "barcode:$barcode"
-        val cached = getCachedFood(cacheKey)
-        if (cached != null && isCacheValid(cached)) {
-            Log.d(TAG, "Found cached food for barcode: $barcode")
-            val decision = decisionLogic.decideSuitability(cached, diabetesType)
-            saveToHistory(barcode, diabetesType, cacheKey, decision)
-            return FoodResult.Success(cached, decision)
+        val cacheKey = "barcode:$normalizedBarcode"
+        val cachedFromDirectKey = getCachedFood(cacheKey) 
+        if (cachedFromDirectKey != null && isCacheValid(cachedFromDirectKey)) {
+            Log.d(TAG, "Found cached food for barcode: ${cachedFromDirectKey.name}")
+            val decision = decisionLogic.decideSuitability(cachedFromDirectKey, diabetesType)
+            saveToHistory(normalizedBarcode, cachedFromDirectKey.name, cacheKey, decision)
+            return FoodResult.Success(cachedFromDirectKey, decision)
         }
 
         try {
@@ -176,47 +168,69 @@ class FoodRepository private constructor(
             if (response.isSuccessful && response.body() != null) {
                 val product = response.body()!!.product
                 if (product?.productName?.isNotBlank() == true) {
+                    val actualFoodName = product.productName
                     val foodItem = FoodItem(
-                        name = product.productName,
+                        name = actualFoodName,
                         brand = product.brands,
                         carbs100g = product.carbohydrates100g,
                         sugars100g = product.sugars100g,
                         fiber100g = product.fiber100g,
                         source = "OFF"
                     )
-                    cacheFood(cacheKey, foodItem)
+                    cacheFood(cacheKey, foodItem) 
                     val decision = decisionLogic.decideSuitability(foodItem, diabetesType)
-                    saveToHistory(barcode, diabetesType, cacheKey, decision)
+                    saveToHistory(normalizedBarcode, actualFoodName, cacheKey, decision)
                     return FoodResult.Success(foodItem, decision)
                 }
             }
         } catch (e: Exception) {
-            return FoodResult.Error("Failed to fetch food data: ${e.message}")
+             Log.e(TAG, "Barcode search exception: ${e.message}", e) 
+            return FoodResult.Error("Failed to fetch food data by barcode: ${e.message}")
         }
 
         return FoodResult.Error("Food not found for barcode '$barcode'")
     }
 
     private suspend fun getAiFoodAnalysis(
-        foodName: String,
+        queryText: String, 
         diabetesType: String
     ): FoodRepository.FoodResult {
-        val cacheKey = "ai:${foodName.lowercase()}:${diabetesType.lowercase()}"
-        val cached = getCachedFood(cacheKey)
-        if (cached != null && isCacheValid(cached)) {
-            Log.d(TAG, "Found cached AI analysis for: $foodName")
-            val decision = decisionLogic.decideSuitability(cached, diabetesType)
-            saveToHistory(foodName, diabetesType, cacheKey, decision)
-            return FoodResult.Success(cached, decision)
+        val normalizedQuery = queryText.lowercase().trim()
+        val cacheKeyForAi = "ai:${normalizedQuery}:${diabetesType.lowercase()}" 
+
+        val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType)
+        if (existingHistoryItem != null) {
+            Log.d(TAG, "Found in history AI analysis for: ${existingHistoryItem.displayName}. Checking cache.")
+            existingHistoryItem.matchedKey?.let { key ->
+                val cached = getCachedFood(key)
+                if (cached != null && isCacheValid(cached)) {
+                    Log.d(TAG, "Found valid cached food for AI history item: ${existingHistoryItem.displayName}")
+                    val decision = decisionLogic.decideSuitability(cached, diabetesType)
+                    saveToHistory(normalizedQuery, cached.name, key, decision)
+                    return FoodResult.Success(cached, decision)
+                }
+            }
+        }
+        
+        val cachedAi = getCachedFood(cacheKeyForAi)
+        if (cachedAi != null && isCacheValid(cachedAi)) {
+            Log.d(TAG, "Found cached AI analysis for: ${cachedAi.name}")
+            val decision = decisionLogic.decideSuitability(cachedAi, diabetesType)
+            saveToHistory(normalizedQuery, cachedAi.name, cacheKeyForAi, decision)
+            return FoodResult.Success(cachedAi, decision)
         }
 
         try {
-            val prompt = createPrompt(foodName, diabetesType)
+            val prompt = createPrompt(queryText, diabetesType)
             val request = GeminiRequest(contents = listOf(Content(parts = listOf(Part(prompt)))))
             val apiKey = BuildConfig.GEMINI_API_KEY
 
             if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY_HERE") {
-                return getSimpleAiAnalysis(foodName, diabetesType)
+                val simpleResult = getSimpleAiAnalysis(queryText, diabetesType) 
+                if (simpleResult is FoodResult.Success) {
+                    saveToHistory(normalizedQuery, simpleResult.foodItem.name, null, simpleResult.decision)
+                }
+                return simpleResult
             }
 
             val response = createGeminiClient().getFoodAnalysis("gemini-2.5-flash-lite", apiKey, request)
@@ -230,16 +244,18 @@ class FoodRepository private constructor(
                     val aiResponse = jsonAdapter.fromJson(cleanedJson)
 
                     if (aiResponse != null) {
-                        val foodItem = FoodItem(name = foodName, source = "AI")
+                        val actualFoodName = queryText.capitalize() 
+                        val foodItem = FoodItem(name = actualFoodName, source = "AI")
                         val decision = FoodDecisionLogic.FoodDecision(
                             category = aiResponse.category,
                             reason = aiResponse.reason,
                             portionText = aiResponse.safePortion,
                             alternatives = aiResponse.alternatives,
-                            source = "AI"
+                            source = "AI",
+                            diabetesType = diabetesType // Added diabetesType
                         )
-                        cacheFood(cacheKey, foodItem)
-                        saveToHistory(foodName, diabetesType, cacheKey, decision)
+                        cacheFood(cacheKeyForAi, foodItem)
+                        saveToHistory(normalizedQuery, actualFoodName, cacheKeyForAi, decision)
                         return FoodResult.Success(foodItem, decision)
                     }
                 }
@@ -247,7 +263,12 @@ class FoodRepository private constructor(
         } catch (e: Exception) {
             Log.e(TAG, "AI fallback failed", e)
         }
-        return getSimpleAiAnalysis(foodName, diabetesType)
+        
+        val simpleResultOnFailure = getSimpleAiAnalysis(queryText, diabetesType)
+        if (simpleResultOnFailure is FoodResult.Success) {
+            saveToHistory(normalizedQuery, simpleResultOnFailure.foodItem.name, null, simpleResultOnFailure.decision)
+        }
+        return simpleResultOnFailure
     }
 
     private fun createPrompt(foodName: String, diabetesType: String): String {
@@ -273,17 +294,17 @@ class FoodRepository private constructor(
     }
 
     private suspend fun getCachedFood(key: String): FoodItem? {
-        return database.foodCacheDao().getFoodByKey(key)?.let { entity ->
+        return database.foodCacheDao().getFoodByKey(key)?.let { foodCacheEntity -> 
             FoodItem(
-                name = entity.name,
-                brand = entity.brand,
-                carbs100g = entity.carbs100g,
-                sugars100g = entity.sugars100g,
-                fiber100g = entity.fiber100g,
-                energyKcal100g = entity.energyKcal100g,
-                countryTags = entity.countryTags,
-                source = entity.source,
-                updatedAt = entity.updatedAt
+                name = foodCacheEntity.name,
+                brand = foodCacheEntity.brand,
+                carbs100g = foodCacheEntity.carbs100g,
+                sugars100g = foodCacheEntity.sugars100g,
+                fiber100g = foodCacheEntity.fiber100g,
+                energyKcal100g = foodCacheEntity.energyKcal100g,
+                countryTags = foodCacheEntity.countryTags,
+                source = foodCacheEntity.source,
+                updatedAt = foodCacheEntity.updatedAt
             )
         }
     }
@@ -293,7 +314,7 @@ class FoodRepository private constructor(
     }
 
     private suspend fun cacheFood(key: String, foodItem: FoodItem) {
-        val entity = FoodCacheEntity(
+        val entityToCache = FoodCacheEntity( 
             key = key,
             name = foodItem.name,
             brand = foodItem.brand,
@@ -305,26 +326,25 @@ class FoodRepository private constructor(
             countryTags = foodItem.countryTags,
             updatedAt = System.currentTimeMillis()
         )
-        database.foodCacheDao().insertFood(entity)
+        database.foodCacheDao().insertFood(entityToCache)
     }
 
     private suspend fun saveToHistory(
-        query: String,
-        diabetesType: String,
+        queryText: String, 
+        actualFoodName: String, 
         matchedKey: String?,
         decision: FoodDecisionLogic.FoodDecision
     ) {
-        val normalizedQuery = query.lowercase().trim()
-        val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType)
+        val normalizedQueryForHistory = queryText.lowercase().trim()
+        val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQueryForHistory, decision.diabetesType)
 
         if (existingHistoryItem != null) {
-            // Update existing item's timestamp to bring it to the top of the history
-            database.historyDao().updateHistoryTimestamp(existingHistoryItem.id, System.currentTimeMillis())
+            database.historyDao().updateHistoryItem(existingHistoryItem.id, actualFoodName, System.currentTimeMillis(), decision.diabetesType)
         } else {
-            // Insert a new history item
             val history = HistoryEntity(
-                queryText = query,
-                diabetesType = diabetesType,
+                queryText = normalizedQueryForHistory,
+                displayName = actualFoodName, 
+                diabetesType = decision.diabetesType,
                 matchedKey = matchedKey,
                 suitability = decision.category,
                 reason = decision.reason,
@@ -333,13 +353,10 @@ class FoodRepository private constructor(
                 sourcesUsed = decision.source,
                 createdAt = System.currentTimeMillis()
             )
-
-            // Clean up old history entries if needed (before inserting new one)
             val count = database.historyDao().getCount()
             if (count >= Constants.MAX_HISTORY_SIZE) {
-                database.historyDao().deleteOldest(count - Constants.MAX_HISTORY_SIZE + 10)
+                database.historyDao().deleteOldest(count - Constants.MAX_HISTORY_SIZE + 10) 
             }
-
             database.historyDao().insertHistory(history)
         }
     }
@@ -348,49 +365,44 @@ class FoodRepository private constructor(
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
-
         val client = OkHttpClient.Builder()
             .addInterceptor(logging)
             .build()
-
         val moshi = Moshi.Builder().build()
-
         val retrofit = Retrofit.Builder()
             .baseUrl("https://generativelanguage.googleapis.com/")
             .client(client)
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
-
         return retrofit.create(GeminiApi::class.java)
     }
 
     private suspend fun getSimpleAiAnalysis(
-        foodName: String,
+        foodNameQuery: String, 
         diabetesType: String
     ): FoodRepository.FoodResult {
         return try {
-            Log.d(TAG, "Using simple AI estimation for: $foodName")
-
+            Log.d(TAG, "Using simple AI estimation for: $foodNameQuery")
+            val actualFoodName = foodNameQuery.capitalize()
             val foodItem = FoodItem(
-                name = foodName,
+                name = actualFoodName, 
                 carbs100g = 15f,
                 sugars100g = 5f,
                 fiber100g = 2f,
                 source = "AI_ESTIMATE"
             )
-
             val decision = FoodDecisionLogic.FoodDecision(
                 category = "SMALL_PORTION",
-                reason = "Estimated values for $foodName - AI analysis not available",
+                reason = "Estimated values for $actualFoodName - AI analysis not available",
                 portionText = "Approximate values (100g portion) - verify with healthcare provider",
                 alternatives = listOf("Consult a nutritionist", "Check detailed nutrition info"),
-                source = "AI_ESTIMATE"
+                source = "AI_ESTIMATE",
+                diabetesType = diabetesType // Added diabetesType
             )
-
             FoodResult.Success(foodItem, decision)
         } catch (e: Exception) {
             Log.e(TAG, "Simple AI analysis failed", e)
-            FoodResult.Error("Unable to analyze $foodName")
+            FoodResult.Error("Unable to analyze $foodNameQuery")
         }
     }
 

@@ -184,7 +184,8 @@ fun ResultCardPreview() {
                 reason = "High net carbs (77.9g per 100g)",
                 portionText = "45g portion. Keep portions small; pair with protein/fiber.",
                 alternatives = listOf("brown rice", "cauliflower rice", "quinoa"),
-                source = "OFF"
+                source = "OFF",
+                diabetesType = "TYPE_2" // Added diabetesType for preview
             ),
             onClear = {}
         )

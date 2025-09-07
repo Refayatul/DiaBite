@@ -12,14 +12,15 @@ interface HistoryDao {
     @Query("SELECT * FROM history ORDER BY createdAt DESC")
     fun getAllHistory(): Flow<List<HistoryEntity>>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) // Changed to REPLACE for simplicity with unique constraints or manual checks
     suspend fun insertHistory(history: HistoryEntity)
-    
+
     @Query("SELECT * FROM history WHERE lower(queryText) = :queryText AND diabetesType = :diabetesType LIMIT 1")
     suspend fun findHistoryItem(queryText: String, diabetesType: String): HistoryEntity?
 
-    @Query("UPDATE history SET displayName = :displayName, createdAt = :timestamp WHERE id = :id")
-    suspend fun updateHistoryItem(id: Long, displayName: String, timestamp: Long)
+    // Corrected to include diabetesType for explicit update, matching the call from FoodRepository
+    @Query("UPDATE history SET displayName = :displayName, createdAt = :timestamp WHERE id = :id AND diabetesType = :diabetesType")
+    suspend fun updateHistoryItem(id: Long, displayName: String, timestamp: Long, diabetesType: String)
 
     @Query("DELETE FROM history")
     suspend fun clearAll()

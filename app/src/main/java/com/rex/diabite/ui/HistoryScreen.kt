@@ -102,7 +102,7 @@ fun HistoryItemCard(
                 modifier = Modifier.weight(1f)
             ) {
                 Text(
-                    text = historyItem.queryText,
+                    text = historyItem.displayName, // Changed from queryText to displayName
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -161,6 +161,7 @@ fun HistoryItemCardPreview() {
             historyItem = HistoryEntity(
                 id = 1,
                 queryText = "White Rice",
+                displayName = "White Rice (Processed)", // Added displayName
                 diabetesType = "TYPE_2",
                 suitability = "SMALL_PORTION",
                 reason = "High net carbs",

@@ -7,7 +7,8 @@ import androidx.room.PrimaryKey
 data class HistoryEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
-    val queryText: String,
+    val queryText: String, // Normalized, lowercase query for searching/deduplication
+    val displayName: String, // The actual, capitalized name for display
     val diabetesType: String, // "TYPE_1" | "TYPE_2"
     val matchedKey: String? = null, // FoodCacheEntity key or null
     val suitability: String, // "SAFE"|"SMALL_PORTION"|"LIMIT"|"AVOID"|"UNKNOWN"

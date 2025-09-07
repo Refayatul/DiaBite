@@ -10,7 +10,8 @@ class FoodDecisionLogic {
         val reason: String,
         val portionText: String,
         val alternatives: List<String>,
-        val source: String
+        val source: String,
+        val diabetesType: String // Added field
     )
 
     fun decideSuitability(foodItem: FoodItem, diabetesType: String): FoodDecision {
@@ -83,7 +84,8 @@ class FoodDecisionLogic {
             reason = reason,
             portionText = portionText,
             alternatives = alternatives,
-            source = foodItem.source
+            source = foodItem.source,
+            diabetesType = diabetesType // Added diabetesType here
         )
     }
 
