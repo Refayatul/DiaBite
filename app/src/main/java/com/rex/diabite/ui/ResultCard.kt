@@ -1,8 +1,10 @@
 package com.rex.diabite.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
@@ -11,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+// import androidx.compose.ui.text.style.TextDecoration // No longer needed
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.rex.diabite.domain.FoodDecisionLogic
@@ -24,7 +27,8 @@ fun ResultCard(
     decision: FoodDecisionLogic.FoodDecision,
     isFavorite: Boolean,
     onToggleFavorite: () -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onAlternativeClick: (String) -> Unit
 ) {
     Card(
         modifier = Modifier
@@ -41,7 +45,6 @@ fun ResultCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Food Name and Brand
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = foodItem.name,
@@ -68,7 +71,6 @@ fun ResultCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Suitability Chip
             val (chipColor, chipTextColor) = when (decision.category) {
                 "SAFE" -> SafeGreen to Color.White
                 "SMALL_PORTION" -> SmallPortionYellow to Color.Black
@@ -92,29 +94,18 @@ fun ResultCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Nutrition Info
-            foodItem.carbs100g?.let { carbs ->
-                Text(
-                    text = "Carbs: ${String.format("%.1f", carbs)}g per 100g",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            foodItem.carbs100g?.let {
+                Text("Carbs: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium)
             }
-            foodItem.sugars100g?.let { sugars ->
-                Text(
-                    text = "Sugars: ${String.format("%.1f", sugars)}g per 100g",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            foodItem.sugars100g?.let {
+                Text("Sugars: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium)
             }
-            foodItem.fiber100g?.let { fiber ->
-                Text(
-                    text = "Fiber: ${String.format("%.1f", fiber)}g per 100g",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+            foodItem.fiber100g?.let {
+                Text("Fiber: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Net Carbs
             Text(
                 text = "Net Carbs: ${String.format("%.1f", foodItem.netCarbsPer100g)}g per 100g",
                 style = MaterialTheme.typography.bodyMedium,
@@ -123,36 +114,43 @@ fun ResultCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Portion Guidance
-            Text(
-                text = decision.portionText,
-                style = MaterialTheme.typography.bodyMedium
-            )
+            Text(decision.portionText, style = MaterialTheme.typography.bodyMedium)
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Alternatives
             Text(
                 text = "Alternatives:",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold
             )
             decision.alternatives.forEach { alternative ->
-                Text(
-                    text = "• $alternative",
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.padding(start = 8.dp, top = 4.dp)
-                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onAlternativeClick(alternative) }
+                        .padding(vertical = 4.dp, horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "• $alternative",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.Filled.ChevronRight,
+                        contentDescription = "Analyze $alternative",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Source and Updated Info
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Source Badges
                 Surface(
                     color = MaterialTheme.colorScheme.primaryContainer,
                     shape = RoundedCornerShape(8.dp)
@@ -164,8 +162,6 @@ fun ResultCard(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
-
-                // Updated Time
                 Text(
                     text = "Updated ${foodItem.updatedAt.toDaysAgo()}",
                     style = MaterialTheme.typography.labelSmall,
@@ -175,7 +171,6 @@ fun ResultCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Clear Button
             Button(
                 onClick = onClear,
                 modifier = Modifier.align(Alignment.End)
@@ -208,9 +203,10 @@ fun ResultCardPreview() {
                 source = "OFF",
                 diabetesType = "TYPE_2"
             ),
-            isFavorite = true, // Added for preview
-            onToggleFavorite = {}, // Added for preview
-            onClear = {}
+            isFavorite = true, 
+            onToggleFavorite = {}, 
+            onClear = {},
+            onAlternativeClick = {} 
         )
     }
 }

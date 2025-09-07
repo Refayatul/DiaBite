@@ -27,13 +27,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _history = MutableStateFlow<List<HistoryEntity>>(emptyList())
     val history: StateFlow<List<HistoryEntity>> = _history.asStateFlow()
 
-    private val _favorites = MutableStateFlow<List<HistoryEntity>>(emptyList()) // New StateFlow for favorites
-    val favorites: StateFlow<List<HistoryEntity>> = _favorites.asStateFlow()    // New StateFlow for favorites
+    private val _favorites = MutableStateFlow<List<HistoryEntity>>(emptyList())
+    val favorites: StateFlow<List<HistoryEntity>> = _favorites.asStateFlow()
 
     init {
         Log.d(TAG, "ViewModel initialized")
         loadHistory()
-        loadFavorites() // Load favorites on init
+        loadFavorites()
     }
 
     fun updateFoodName(name: String) {
@@ -81,12 +81,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val currentDiabetesType = _uiState.value.diabetesType
 
         viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null, currentHistoryItemId = null, isCurrentItemFavorite = false)
+            _uiState.value = _uiState.value.copy(
+                isLoading = true, 
+                error = null, 
+                currentHistoryItemId = null, 
+                isCurrentItemFavorite = false,
+                isAnalysingWithAi = false // Reset AI analysis flag
+            )
             Log.d(TAG, "UI State set to loading")
 
             try {
                 val result: FoodRepository.FoodResult = if (currentBarcode.isNotBlank()) {
                     Log.d(TAG, "Analyzing by barcode: $currentBarcode")
+                    // Barcode search currently does not have an AI step, so no onAiAnalysisStart needed here
                     repository.getFoodByBarcode(
                         barcode = currentBarcode,
                         diabetesType = currentDiabetesType,
@@ -97,7 +104,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     repository.searchFoodByName(
                         query = currentFoodName,
                         diabetesType = currentDiabetesType,
-                        useStaging = _uiState.value.useStaging
+                        useStaging = _uiState.value.useStaging,
+                        onAiAnalysisStart = { 
+                            _uiState.value = _uiState.value.copy(isAnalysingWithAi = true) 
+                            Log.d(TAG, "AI analysis started, updating UI state.")
+                        }
                     )
                 } else {
                     Log.w(TAG, "No food name or barcode provided")
@@ -105,7 +116,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         isLoading = false,
                         error = "Please enter a food name or barcode",
                         currentHistoryItemId = null,
-                        isCurrentItemFavorite = false
+                        isCurrentItemFavorite = false,
+                        isAnalysingWithAi = false
                     )
                     return@launch
                 }
@@ -117,7 +129,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             isLoading = false,
                             foodItem = result.foodItem,
                             decision = result.decision,
-                            error = null
+                            error = null,
+                            isAnalysingWithAi = false // Reset AI flag on success
                         )
                         val queryKeyForHistory = if (currentBarcode.isNotBlank()) currentBarcode else currentFoodName
                         updateUiWithHistoryItemDetails(queryKeyForHistory.lowercase().trim(), result.decision.diabetesType)
@@ -131,7 +144,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             foodItem = null,
                             decision = null,
                             currentHistoryItemId = null,
-                            isCurrentItemFavorite = false
+                            isCurrentItemFavorite = false,
+                            isAnalysingWithAi = false // Reset AI flag on error
                         )
                     }
                 }
@@ -143,7 +157,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     foodItem = null,
                     decision = null,
                     currentHistoryItemId = null,
-                    isCurrentItemFavorite = false
+                    isCurrentItemFavorite = false,
+                    isAnalysingWithAi = false // Reset AI flag on exception
                 )
             }
         }
@@ -159,8 +174,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     repository.setFavoriteStatus(itemId, newFavoriteStatus)
                     _uiState.value = _uiState.value.copy(isCurrentItemFavorite = newFavoriteStatus)
                     Log.d(TAG, "Toggled favorite for item $itemId to $newFavoriteStatus")
-                    // No need to explicitly reload all favorites here, as the Flow should update if items change.
-                    // However, if getFavoriteHistoryItems() is not emitting on single item change, explicit reload might be needed.
                 } catch (e: Exception) {
                     Log.e(TAG, "Error toggling favorite for item $itemId", e)
                 }
@@ -177,7 +190,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             decision = null,
             error = null,
             currentHistoryItemId = null,
-            isCurrentItemFavorite = false
+            isCurrentItemFavorite = false,
+            isAnalysingWithAi = false // Also clear AI flag here
         )
     }
 
@@ -191,7 +205,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // New function to load favorite items
     private fun loadFavorites() {
         Log.d(TAG, "Loading favorites")
         viewModelScope.launch {
@@ -206,7 +219,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d(TAG, "Clearing history")
         viewModelScope.launch {
             repository.clearHistory()
-            // Clearing all history also means clearing favorites from the UI perspective
             _favorites.value = emptyList() 
         }
     }
@@ -220,7 +232,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             currentHistoryItemId = historyItem.id,
             isCurrentItemFavorite = historyItem.isFavorite,
             isLoading = true, 
-            error = null
+            error = null,
+            isAnalysingWithAi = false // Reset AI flag for re-run
         )
         analyzeFood()
     }
@@ -235,7 +248,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val decision: FoodDecisionLogic.FoodDecision? = null,
         val error: String? = null,
         val currentHistoryItemId: Long? = null,      
-        val isCurrentItemFavorite: Boolean = false   
+        val isCurrentItemFavorite: Boolean = false,
+        val isAnalysingWithAi: Boolean = false // Added for AI loading indicator
     )
 
     class Factory(private val application: Application) : ViewModelProvider.Factory {
