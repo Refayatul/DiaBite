@@ -7,8 +7,8 @@ data class FoodItem(
     val sugars100g: Float? = null,
     val fiber100g: Float? = null,
     val energyKcal100g: Float? = null,
-    val countryTags: String? = null,
-    val source: String, // "OFF", "USDA", "AI"
+    val countryTags: List<String> = emptyList(), // Changed from String? to List<String>
+    val source: String, // "OFF", "USDA", "AI", "LOCAL_DB", "AI_ESTIMATE"
     val updatedAt: Long = System.currentTimeMillis()
 ) {
     val netCarbsPer100g: Float
