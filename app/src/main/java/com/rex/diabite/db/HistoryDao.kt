@@ -14,6 +14,12 @@ interface HistoryDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertHistory(history: HistoryEntity)
+    
+    @Query("SELECT * FROM history WHERE lower(queryText) = :queryText AND diabetesType = :diabetesType LIMIT 1")
+    suspend fun findHistoryItem(queryText: String, diabetesType: String): HistoryEntity?
+
+    @Query("UPDATE history SET displayName = :displayName, createdAt = :timestamp WHERE id = :id")
+    suspend fun updateHistoryItem(id: Long, displayName: String, timestamp: Long)
 
     @Query("DELETE FROM history")
     suspend fun clearAll()
