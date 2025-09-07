@@ -1,5 +1,6 @@
 package com.rex.diabite.network
 
+import com.rex.diabite.model.FoodSearchResult
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import retrofit2.Response

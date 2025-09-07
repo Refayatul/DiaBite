@@ -1,6 +1,7 @@
 package com.rex.diabite
 
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,15 +16,20 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.rex.diabite.ui.HomeScreen
-import com.rex.diabite.ui.HistoryScreen
-import com.rex.diabite.ui.SettingsScreen
-import com.rex.diabite.ui.MainViewModel
+import com.rex.diabite.network.RetrofitClient
+import com.rex.diabite.ui.*
 import com.rex.diabite.ui.theme.DiaBiteTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Debug: Check if BuildConfig is working
+        Log.d("BuildConfigTest", "FDC_API_KEY: ${com.rex.diabite.BuildConfig.FDC_API_KEY}")
+
+        // Test API connectivity
+        testApiConnectivity()
+
         setContent {
             DiaBiteTheme {
                 Surface(
@@ -93,5 +99,20 @@ fun MainApp() {
             }
             composable("settings") { SettingsScreen(viewModel) }
         }
+    }
+}
+
+// Test function to verify API connectivity
+fun testApiConnectivity() {
+    try {
+        val offClient = RetrofitClient.createOffClient()
+        Log.d("APITest", "OFF Client created successfully")
+
+        val usdaClient = RetrofitClient.createUsdaClient()
+        Log.d("APITest", "USDA Client created successfully")
+
+        Log.d("APITest", "API clients initialized successfully")
+    } catch (e: Exception) {
+        Log.e("APITest", "Error initializing API clients", e)
     }
 }

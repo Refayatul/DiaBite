@@ -1,16 +1,21 @@
 package com.rex.diabite.model
 
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
+
+@JsonClass(generateAdapter = true)
 data class FoodSearchResult(
-    val code: String? = null,
-    val product_name: String? = null,
-    val brands: String? = null,
-    val countries_tags_en: List<String>? = null,
-    val categories_tags: List<String>? = null,
-    val carbohydrates_100g: Double? = null,
-    val sugars_100g: Double? = null,
-    val fiber_100g: Double? = null,
-    val `energy-kcal_100g`: Double? = null,
-    val nutriscore_grade: String? = null,
-    val nutrition_grade_fr: String? = null,
-    val last_modified_t: Long? = null
+    val products: List<Product>?,
+    val product: Product?
+)
+
+@JsonClass(generateAdapter = true)
+data class Product(
+    @Json(name = "product_name") val productName: String?,
+    val brands: String?,
+    @Json(name = "carbohydrates_100g") val carbohydrates100g: Float?,
+    @Json(name = "sugars_100g") val sugars100g: Float?,
+    @Json(name = "fiber_100g") val fiber100g: Float?,
+    @Json(name = "energy-kcal_100g") val energyKcal100g: Float?,
+    @Json(name = "countries_tags_en") val countriesTagsEn: String?
 )
