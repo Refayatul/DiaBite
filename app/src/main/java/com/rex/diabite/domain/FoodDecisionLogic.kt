@@ -75,8 +75,8 @@ class FoodDecisionLogic {
         }
         val portionText = "${portionGrams}g portion. $portionNote"
 
-        // Alternatives based on food name
-        val alternatives = suggestAlternatives(foodItem.name.lowercase())
+        // Alternatives based on food name and category
+        val alternatives = suggestAlternatives(foodItem.name.lowercase(), category)
 
         return FoodDecision(
             category = category,
@@ -93,25 +93,47 @@ class FoodDecisionLogic {
         return grams.coerceIn(20f, 300f).toInt()
     }
 
-    private fun suggestAlternatives(foodName: String): List<String> {
-        return when {
+    private fun suggestAlternatives(foodName: String, category: String): List<String> {
+        val baseAlternatives = mutableListOf<String>()
+
+        when {
             foodName.contains("sugar") || foodName.contains("sweet") ||
                     foodName.contains("soda") || foodName.contains("cola") -> {
-                listOf("unsweetened yogurt", "nuts", "fruit with peel", "water/unsweetened tea")
+                baseAlternatives.addAll(listOf("unsweetened yogurt", "nuts", "fruit with peel", "water/unsweetened tea"))
             }
             foodName.contains("rice") -> {
-                listOf("brown rice", "cauliflower rice", "quinoa")
+                baseAlternatives.addAll(listOf("brown rice", "cauliflower rice", "quinoa"))
             }
             foodName.contains("roti") || foodName.contains("naan") -> {
-                listOf("whole wheat roti", "multigrain roti")
+                baseAlternatives.addAll(listOf("whole wheat roti", "multigrain roti"))
             }
             foodName.contains("samosa") || foodName.contains("fries") ||
                     foodName.contains("chips") || foodName.contains("pakoda") -> {
-                listOf("roasted chana", "baked options", "salad")
+                baseAlternatives.addAll(listOf("roasted chana", "baked options", "salad"))
             }
             else -> {
-                listOf("dal", "grilled fish/chicken", "non-starchy vegetables")
+                baseAlternatives.addAll(listOf("dal", "grilled fish/chicken", "non-starchy vegetables"))
             }
+        }
+
+        return when (category) {
+            "AVOID", "LIMIT" -> {
+                // Add stronger recommendations for avoidance/limitation
+                val specificAlternatives = when {
+                    foodName.contains("sugar") || foodName.contains("sweet") -> listOf("sugar-free desserts", "natural sweeteners like stevia")
+                    foodName.contains("rice") -> listOf("ragi roti", "barley").filter { !baseAlternatives.contains(it) }
+                    foodName.contains("roti") || foodName.contains("bread") -> listOf("whole grain bread", "oats").filter { !baseAlternatives.contains(it) }
+                    else -> emptyList()
+                }
+                val combined = (specificAlternatives + baseAlternatives).distinct().take(3) // Limit to 3 most relevant
+                if (combined.isEmpty()) {
+                    listOf("Consult a nutritionist", "Focus on lean protein and vegetables")
+                } else {
+                    combined + "(Consult a nutritionist for personalized advice)"
+                }
+            }
+            "UNKNOWN" -> listOf("Consult a nutritionist", "Check detailed nutrition info")
+            else -> baseAlternatives
         }
     }
 }

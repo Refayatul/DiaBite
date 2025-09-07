@@ -35,6 +35,11 @@ android {
         // Provide a default value if FDC_API_KEY is not found
         val apiKey = localProperties.getProperty("FDC_API_KEY", "YOUR_API_KEY_HERE")
         buildConfigField("String", "FDC_API_KEY", "\"$apiKey\"")
+
+        // In the defaultConfig block, replace the Gemini API key section with:
+        // Add Gemini API key
+        val geminiApiKey = localProperties.getProperty("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
+        buildConfigField("String", "GEMINI_API_KEY", "\"$geminiApiKey\"")
     }
 
     buildTypes {
@@ -51,7 +56,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     kotlinOptions {
-        jvmTarget = "11"  // Use jvmTarget instead of jvmToolchain
+        jvmTarget = "11"
     }
     buildFeatures {
         compose = true

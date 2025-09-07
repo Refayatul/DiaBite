@@ -1,5 +1,6 @@
 [versions]
 agp = "8.13.0"
+aiGoogle = "0.2.0"
 converterMoshi = "3.0.0"
 kotlin = "2.2.10"
 coreKtx = "1.17.0"
@@ -23,6 +24,7 @@ roomRuntime = "2.7.2"
 roomKtx = "2.7.2"
 
 [libraries]
+androidx-ai-google = { module = "androidx.ai:ai-google", version.ref = "aiGoogle" }
 androidx-compose-material-icons-extended = { module = "androidx.compose.material:material-icons-extended" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleRuntimeCompose" }

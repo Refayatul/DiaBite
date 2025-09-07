@@ -11,6 +11,26 @@ import com.rex.diabite.network.RetrofitClient
 import com.rex.diabite.util.Constants
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import com.rex.diabite.network.GeminiApi
+import com.rex.diabite.network.GeminiRequest
+import com.rex.diabite.network.Content
+import com.rex.diabite.network.Part
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
+import com.squareup.moshi.Moshi
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
+import retrofit2.converter.moshi.MoshiConverterFactory
+
+// Simple AI response model
+@JsonClass(generateAdapter = true)
+data class SimpleAiResponse(
+    @Json(name = "category") val category: String,
+    @Json(name = "reason") val reason: String,
+    @Json(name = "safePortion") val safePortion: String,
+    @Json(name = "alternatives") val alternatives: List<String>
+)
 
 class FoodRepository private constructor(
     private val database: AppDatabase
@@ -191,8 +211,9 @@ class FoodRepository private constructor(
             Log.e(TAG, "USDA search exception: ${e.message}", e)
         }
 
-        Log.d(TAG, "No food data found for: $query")
-        return FoodResult.Error("No food data found for '$query'")
+        // If we get here, all APIs failed, try AI fallback
+        Log.d(TAG, "All APIs failed, trying AI fallback for: $query")
+        return getAiFoodAnalysis(query, diabetesType)
     }
 
     suspend fun getFoodByBarcode(
@@ -332,6 +353,173 @@ class FoodRepository private constructor(
         }
 
         database.historyDao().insertHistory(history)
+    }
+
+    private fun createGeminiClient(): GeminiApi {
+        val logging = HttpLoggingInterceptor().apply {
+            level = HttpLoggingInterceptor.Level.BODY
+        }
+
+        val client = OkHttpClient.Builder()
+            .addInterceptor(logging)
+            .build()
+
+        val moshi = Moshi.Builder().build()
+
+        val retrofit = Retrofit.Builder()
+            .baseUrl("https://generativelanguage.googleapis.com/")
+            .client(client)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+
+        return retrofit.create(GeminiApi::class.java)
+    }
+
+    private suspend fun getAiFoodAnalysis(
+        foodName: String,
+        diabetesType: String
+    ): FoodRepository.FoodResult {
+        try {
+            Log.d(TAG, "Trying AI fallback for: $foodName")
+
+            val prompt = """
+                You are a nutrition assistant focusing on diabetes-friendly guidance. Be conservative and region-aware (South Asia). If unsure, return UNKNOWN.
+                
+                Food: $foodName
+                DiabetesType: $diabetesType
+                
+                Return JSON ONLY in this exact format:
+                {
+                  "category": "SMALL_PORTION",
+                  "reason": "Estimated analysis for $foodName",
+                  "safePortion": "100g portion - verify with healthcare provider",
+                  "alternatives": ["Consult a nutritionist", "Check detailed nutrition info"]
+                }
+                
+                Rules:
+                - Sugary sweets/drinks → often AVOID.
+                - Rice/roti/starchy foods → often SMALL_PORTION with guidance.
+                - Prefer local alternatives where relevant.
+                - If unsure, use "UNKNOWN".
+                - Always return valid JSON.
+            """.trimIndent()
+
+            val request = GeminiRequest(
+                contents = listOf(
+                    Content(
+                        parts = listOf(Part(prompt))
+                    )
+                )
+            )
+
+            val apiKey = BuildConfig.GEMINI_API_KEY
+            if (apiKey == "YOUR_GEMINI_API_KEY_HERE" || apiKey.isBlank()) {
+                Log.w(TAG, "Gemini API key not configured, using simple estimate")
+                return getSimpleAiAnalysis(foodName, diabetesType)
+            }
+
+            // Use Gemini 2.5 Flash Lite model
+            val response = createGeminiClient().getFoodAnalysis(
+                "gemini-2.5-flash-lite",
+                apiKey,
+                request
+            )
+
+            if (response.isSuccessful && response.body()?.candidates?.isNotEmpty() == true) {
+                val textResponse = response.body()?.candidates?.get(0)?.content?.parts?.get(0)?.text
+                Log.d(TAG, "AI response: $textResponse")
+
+                if (textResponse != null) {
+                    try {
+                        // Try to parse the JSON response
+                        val moshi = Moshi.Builder().build()
+                        val jsonAdapter = moshi.adapter(SimpleAiResponse::class.java)
+                        val aiResponse = jsonAdapter.fromJson(textResponse)
+
+                        if (aiResponse != null) {
+                            val foodItem = FoodItem(
+                                name = foodName,
+                                source = "AI"
+                            )
+
+                            val decision = FoodDecisionLogic.FoodDecision(
+                                category = aiResponse.category,
+                                reason = aiResponse.reason,
+                                portionText = aiResponse.safePortion,
+                                alternatives = aiResponse.alternatives,
+                                source = "AI"
+                            )
+
+                            return FoodResult.Success(foodItem, decision)
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse AI JSON response", e)
+                        // Try to extract info from plain text response
+                        val foodItem = FoodItem(
+                            name = foodName,
+                            source = "AI"
+                        )
+
+                        val decision = FoodDecisionLogic.FoodDecision(
+                            category = "SMALL_PORTION",
+                            reason = "AI analysis completed",
+                            portionText = textResponse.take(100) + "...",
+                            alternatives = listOf("Consult a nutritionist"),
+                            source = "AI"
+                        )
+
+                        return FoodResult.Success(foodItem, decision)
+                    }
+                }
+            } else {
+                Log.e(TAG, "AI API call failed: ${response.code()} - ${response.message()}")
+                if (response.errorBody() != null) {
+                    try {
+                        val errorBody = response.errorBody()?.string()
+                        Log.e(TAG, "AI error body: $errorBody")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error reading AI error body", e)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "AI fallback failed", e)
+        }
+
+        // Fallback to simple estimation
+        return getSimpleAiAnalysis(foodName, diabetesType)
+    }
+
+    private suspend fun getSimpleAiAnalysis(
+        foodName: String,
+        diabetesType: String
+    ): FoodRepository.FoodResult {
+        return try {
+            Log.d(TAG, "Using simple AI estimation for: $foodName")
+
+            // Create a simple food item with basic info
+            val foodItem = FoodItem(
+                name = foodName,
+                carbs100g = 15f, // Default values
+                sugars100g = 5f,
+                fiber100g = 2f,
+                source = "AI_ESTIMATE"
+            )
+
+            // Create a basic decision
+            val decision = FoodDecisionLogic.FoodDecision(
+                category = "SMALL_PORTION",
+                reason = "Estimated values for $foodName - AI analysis not available",
+                portionText = "Approximate values (100g portion) - verify with healthcare provider",
+                alternatives = listOf("Consult a nutritionist", "Check detailed nutrition info"),
+                source = "AI_ESTIMATE"
+            )
+
+            FoodResult.Success(foodItem, decision)
+        } catch (e: Exception) {
+            Log.e(TAG, "Simple AI analysis failed", e)
+            FoodResult.Error("Unable to analyze $foodName")
+        }
     }
 
     sealed class FoodResult {
