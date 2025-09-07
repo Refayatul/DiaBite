@@ -2,6 +2,9 @@ package com.rex.diabite.ui
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -19,6 +22,8 @@ import com.rex.diabite.util.toDaysAgo
 fun ResultCard(
     foodItem: FoodItem,
     decision: FoodDecisionLogic.FoodDecision,
+    isFavorite: Boolean,
+    onToggleFavorite: () -> Unit,
     onClear: () -> Unit
 ) {
     Card(
@@ -31,18 +36,34 @@ fun ResultCard(
         Column(
             modifier = Modifier.padding(16.dp)
         ) {
-            // Food Name and Brand
-            Text(
-                text = foodItem.name,
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-            foodItem.brand?.let { brand ->
-                Text(
-                    text = brand,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Food Name and Brand
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = foodItem.name,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                    foodItem.brand?.let {
+                        brand ->
+                        Text(
+                            text = brand,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                IconButton(onClick = onToggleFavorite) {
+                    Icon(
+                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
+                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
@@ -185,8 +206,10 @@ fun ResultCardPreview() {
                 portionText = "45g portion. Keep portions small; pair with protein/fiber.",
                 alternatives = listOf("brown rice", "cauliflower rice", "quinoa"),
                 source = "OFF",
-                diabetesType = "TYPE_2" // Added diabetesType for preview
+                diabetesType = "TYPE_2"
             ),
+            isFavorite = true, // Added for preview
+            onToggleFavorite = {}, // Added for preview
             onClear = {}
         )
     }

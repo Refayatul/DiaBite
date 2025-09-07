@@ -6,7 +6,7 @@ import com.rex.diabite.BuildConfig
 import com.rex.diabite.data.FoodCacheEntity
 import com.rex.diabite.data.HistoryEntity
 import com.rex.diabite.db.AppDatabase
-import com.rex.diabite.db.LocalFoodDatabase // NEW IMPORT
+import com.rex.diabite.db.LocalFoodDatabase
 import com.rex.diabite.domain.FoodDecisionLogic
 import com.rex.diabite.model.FoodItem
 import com.rex.diabite.network.RetrofitClient
@@ -24,7 +24,6 @@ import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
 
-// Simple AI response model
 @JsonClass(generateAdapter = true)
 data class SimpleAiResponse(
     @Json(name = "category") val category: String,
@@ -34,25 +33,22 @@ data class SimpleAiResponse(
 )
 
 class FoodRepository private constructor(
-    private val context: Context, // Added context
+    private val context: Context,
     private val database: AppDatabase
 ) {
-    // private val offApi = RetrofitClient.createOffClient() // Commented out as OFF API is being removed for now
     private val usdaApi = RetrofitClient.createUsdaClient()
     private val decisionLogic = FoodDecisionLogic()
-    private val localFoodDatabase = LocalFoodDatabase(context) // NEW: Initialize local DB
-
+    private val localFoodDatabase = LocalFoodDatabase(context)
     private val TAG = "FoodRepository"
 
     suspend fun searchFoodByName(
         query: String,
         diabetesType: String,
-        useStaging: Boolean = false // useStaging might be irrelevant if OFF is removed
-    ): FoodRepository.FoodResult {
+        useStaging: Boolean = false
+    ): FoodResult {
         val normalizedQuery = query.lowercase().trim()
         Log.d(TAG, "Searching for food: $normalizedQuery, Diabetes Type: $diabetesType")
 
-        // Step 1: Check Search History first
         val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType)
         if (existingHistoryItem != null) {
             Log.d(TAG, "Found in history: ${existingHistoryItem.displayName}. Checking Room cache via matchedKey.")
@@ -61,68 +57,34 @@ class FoodRepository private constructor(
                 if (cachedFromHistory != null && isCacheValid(cachedFromHistory)) {
                     Log.d(TAG, "Found valid cached food for history item: ${cachedFromHistory.name} from key: $key")
                     val decision = decisionLogic.decideSuitability(cachedFromHistory, diabetesType)
-                    saveToHistory(normalizedQuery, cachedFromHistory.name, key, decision) // Update timestamp
+                    // Update timestamp, do not change favorite status here
+                    saveToHistory(normalizedQuery, cachedFromHistory.name, key, decision)
                     return FoodResult.Success(cachedFromHistory, decision)
                 }
             }
         }
 
-        // Step 2: Check Room cache directly (if not found via history or history's cache was invalid)
         val cacheKey = "name:$normalizedQuery"
         val cachedFromDirectKey = getCachedFood(cacheKey)
         if (cachedFromDirectKey != null && isCacheValid(cachedFromDirectKey)) {
             Log.d(TAG, "Found valid cached food directly from Room cache: ${cachedFromDirectKey.name}")
             val decision = decisionLogic.decideSuitability(cachedFromDirectKey, diabetesType)
-            saveToHistory(normalizedQuery, cachedFromDirectKey.name, cacheKey, decision) // Save/Update history
+            saveToHistory(normalizedQuery, cachedFromDirectKey.name, cacheKey, decision) // New item, default not favorite
             return FoodResult.Success(cachedFromDirectKey, decision)
         }
 
-        // Step 3: Search local SQLite database
         Log.d(TAG, "Not in history or Room cache. Trying local SQLite database for: $normalizedQuery")
         val localDbFoodItem = localFoodDatabase.searchFoodByName(normalizedQuery)
         if (localDbFoodItem != null) {
             Log.i(TAG, "Found in local SQLite database: ${localDbFoodItem.name}")
-            val localDbCacheKey = "name:${localDbFoodItem.name.lowercase().trim()}" 
-            
-            cacheFood(localDbCacheKey, localDbFoodItem) // Cache it in Room
+            val localDbCacheKey = "name:${localDbFoodItem.name.lowercase().trim()}"
+            cacheFood(localDbCacheKey, localDbFoodItem)
             val decision = decisionLogic.decideSuitability(localDbFoodItem, diabetesType)
-            saveToHistory(normalizedQuery, localDbFoodItem.name, localDbCacheKey, decision)
+            saveToHistory(normalizedQuery, localDbFoodItem.name, localDbCacheKey, decision) // New item, default not favorite
             return FoodResult.Success(localDbFoodItem, decision)
         }
 
-        // Step 4: Open Food Facts API (Commented out)
-        // TODO: May use later
-        /*
-        Log.d(TAG, "Not in local DB. Trying OFF search for: $normalizedQuery")
-        try {
-            val response = offApi.searchProducts(normalizedQuery) // offApi would need to be re-enabled
-            if (response.isSuccessful && response.body() != null) {
-                val offResponse = response.body()!!
-                val firstProduct = offResponse.products?.firstOrNull()
-                if (firstProduct?.productName?.isNotBlank() == true) {
-                    val actualFoodName = firstProduct.productName
-                    val foodItem = FoodItem(
-                        name = actualFoodName,
-                        brand = firstProduct.brands,
-                        carbs100g = firstProduct.carbohydrates100g,
-                        sugars100g = firstProduct.sugars100g,
-                        fiber100g = firstProduct.fiber100g,
-                        energyKcal100g = firstProduct.energyKcal100g,
-                        countryTags = firstProduct.countriesTagsEn?.mapNotNull { it?.toString() } ?: emptyList(), 
-                        source = "OFF"
-                    )
-                    cacheFood(cacheKey, foodItem) 
-                    val decision = decisionLogic.decideSuitability(foodItem, diabetesType)
-                    saveToHistory(normalizedQuery, actualFoodName, cacheKey, decision)
-                    return FoodResult.Success(foodItem, decision)
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "OFF search exception: ${e.message}", e)
-        }
-        */
-
-        // Step 5: Try USDA API
+        // USDA API call
         Log.d(TAG, "Not in local DB. Trying USDA API for: $normalizedQuery")
         try {
             val response = usdaApi.searchFoods(apiKey = BuildConfig.FDC_API_KEY, query = normalizedQuery)
@@ -143,7 +105,7 @@ class FoodRepository private constructor(
                     val usdaCacheKey = "name:${actualFoodName.lowercase().trim()}"
                     cacheFood(usdaCacheKey, foodItem)
                     val decision = decisionLogic.decideSuitability(foodItem, diabetesType)
-                    saveToHistory(normalizedQuery, actualFoodName, usdaCacheKey, decision)
+                    saveToHistory(normalizedQuery, actualFoodName, usdaCacheKey, decision) // New item, default not favorite
                     return FoodResult.Success(foodItem, decision)
                 }
             }
@@ -151,16 +113,15 @@ class FoodRepository private constructor(
             Log.e(TAG, "USDA search exception: ${e.message}", e)
         }
 
-        // Step 6: Try Gemini AI as final fallback
         Log.d(TAG, "Not found in USDA. Trying Gemini AI for query: $query")
-        return getAiFoodAnalysis(query, diabetesType)
+        return getAiFoodAnalysis(query, diabetesType) // Removed third boolean argument
     }
 
     suspend fun getFoodByBarcode(
         barcode: String,
         diabetesType: String,
-        useStaging: Boolean = false 
-    ): FoodRepository.FoodResult {
+        useStaging: Boolean = false
+    ): FoodResult {
         val normalizedBarcode = barcode.lowercase().trim()
         Log.d(TAG, "Searching for barcode: $normalizedBarcode, Diabetes Type: $diabetesType")
 
@@ -172,7 +133,7 @@ class FoodRepository private constructor(
                 if (cached != null && isCacheValid(cached)) {
                     Log.d(TAG, "Found valid cached food for history item: ${cached.name}")
                     val decision = decisionLogic.decideSuitability(cached, diabetesType)
-                    saveToHistory(normalizedBarcode, cached.name, key, decision) 
+                    saveToHistory(normalizedBarcode, cached.name, key, decision) // Update timestamp, preserve favorite
                     return FoodResult.Success(cached, decision)
                 }
             }
@@ -183,70 +144,41 @@ class FoodRepository private constructor(
         if (cachedFromDirectKey != null && isCacheValid(cachedFromDirectKey)) {
             Log.d(TAG, "Found cached food for barcode: ${cachedFromDirectKey.name}")
             val decision = decisionLogic.decideSuitability(cachedFromDirectKey, diabetesType)
-            saveToHistory(normalizedBarcode, cachedFromDirectKey.name, cacheKey, decision)
+            saveToHistory(normalizedBarcode, cachedFromDirectKey.name, cacheKey, decision) // New item, default not favorite
             return FoodResult.Success(cachedFromDirectKey, decision)
         }
-
-        // TODO: May use later
-        /*
-        Log.d(TAG, "Barcode not in cache. Trying OFF API for barcode: $barcode")
-        try {
-            val offClient = if (::offApi.isInitialized) offApi else RetrofitClient.createOffClient(useStaging)
-            val response = offClient.getProductByBarcode(barcode)
-            if (response.isSuccessful && response.body() != null) {
-                val product = response.body()!!.product
-                if (product?.productName?.isNotBlank() == true) {
-                    val actualFoodName = product.productName
-                    val foodItem = FoodItem(
-                        name = actualFoodName,
-                        brand = product.brands,
-                        carbs100g = product.carbohydrates100g,
-                        sugars100g = product.sugars100g,
-                        fiber100g = product.fiber100g,
-                        countryTags = product.countriesTagsEn?.mapNotNull { it?.toString() } ?: emptyList(),
-                        source = "OFF"
-                    )
-                    cacheFood(cacheKey, foodItem)
-                    val decision = decisionLogic.decideSuitability(foodItem, diabetesType)
-                    saveToHistory(normalizedBarcode, actualFoodName, cacheKey, decision)
-                    return FoodResult.Success(foodItem, decision)
-                }
-            }
-        } catch (e: Exception) {
-             Log.e(TAG, "Barcode search exception (OFF): ${e.message}", e)
-        }
-        */
-
+        
         Log.w(TAG, "Food not found for barcode '$barcode' after checking history, cache, and (commented out) OFF API.")
         return FoodResult.Error("Food not found for barcode '$barcode'")
     }
 
+    // Removed isPotentiallyFavorite parameter
     private suspend fun getAiFoodAnalysis(
-        queryText: String, 
+        queryText: String,
         diabetesType: String
-    ): FoodRepository.FoodResult {
+    ): FoodResult {
         val normalizedQuery = queryText.lowercase().trim()
         val cacheKeyForAi = "ai:${normalizedQuery}:${diabetesType.lowercase()}"
 
-        val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType) 
-        if (existingHistoryItem != null && existingHistoryItem.sourcesUsed.contains("AI")) { 
+        val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType)
+        if (existingHistoryItem != null && existingHistoryItem.sourcesUsed.contains("AI")) {
             Log.d(TAG, "Found in history AI analysis for: ${existingHistoryItem.displayName}. Checking cache.")
             existingHistoryItem.matchedKey?.let { key ->
                 val cached = getCachedFood(key)
                 if (cached != null && isCacheValid(cached)) {
                     Log.d(TAG, "Found valid cached food for AI history item: ${cached.name}")
-                    val decision = decisionLogic.decideSuitability(cached, diabetesType) 
-                    saveToHistory(normalizedQuery, cached.name, key, decision)
+                    val decision = decisionLogic.decideSuitability(cached, diabetesType)
+                    saveToHistory(normalizedQuery, cached.name, key, decision) // Update timestamp, preserve favorite
                     return FoodResult.Success(cached, decision)
                 }
             }
         }
-        
+
         val cachedAiFoodItem = getCachedFood(cacheKeyForAi)
-        if (cachedAiFoodItem != null && isCacheValid(cachedAiFoodItem) && cachedAiFoodItem.source.contains("AI")) { 
+        if (cachedAiFoodItem != null && isCacheValid(cachedAiFoodItem) && cachedAiFoodItem.source.contains("AI")) {
             Log.d(TAG, "Found cached AI analysis (FoodItem): ${cachedAiFoodItem.name}")
             val decision = decisionLogic.decideSuitability(cachedAiFoodItem, diabetesType)
-            saveToHistory(normalizedQuery, cachedAiFoodItem.name, cacheKeyForAi, decision)
+            saveToHistory(normalizedQuery, cachedAiFoodItem.name, cacheKeyForAi, decision) // New item, default not favorite
             return FoodResult.Success(cachedAiFoodItem, decision)
         }
 
@@ -258,17 +190,16 @@ class FoodRepository private constructor(
 
             if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY_HERE") {
                 Log.w(TAG, "Gemini API key not configured. Falling back to simple AI analysis.")
-                val simpleResult = getSimpleAiAnalysis(queryText, diabetesType) 
+                val simpleResult = getSimpleAiAnalysis(queryText, diabetesType)
                 if (simpleResult is FoodResult.Success) {
                     val simpleAiCacheKey = "ai_estimate:${normalizedQuery}:${diabetesType.lowercase()}"
-                    cacheFood(simpleAiCacheKey, simpleResult.foodItem) 
+                    cacheFood(simpleAiCacheKey, simpleResult.foodItem)
                     saveToHistory(normalizedQuery, simpleResult.foodItem.name, simpleAiCacheKey, simpleResult.decision)
                 }
                 return simpleResult
             }
 
             val response = createGeminiClient().getFoodAnalysis("gemini-2.5-flash-lite", apiKey, request)
-
             if (response.isSuccessful && response.body()?.candidates?.isNotEmpty() == true) {
                 val textResponse = response.body()?.candidates?.get(0)?.content?.parts?.get(0)?.text
                 if (textResponse != null) {
@@ -278,17 +209,17 @@ class FoodRepository private constructor(
                     val aiResponse = jsonAdapter.fromJson(cleanedJson)
 
                     if (aiResponse != null) {
-                        val actualFoodName = queryText.capitalize() 
-                        val foodItem = FoodItem(name = actualFoodName, source = "AI") 
+                        val actualFoodName = queryText.capitalize()
+                        val foodItem = FoodItem(name = actualFoodName, source = "AI")
                         val decision = FoodDecisionLogic.FoodDecision(
                             category = aiResponse.category,
                             reason = aiResponse.reason,
                             portionText = aiResponse.safePortion,
                             alternatives = aiResponse.alternatives,
                             source = "AI",
-                            diabetesType = diabetesType 
+                            diabetesType = diabetesType
                         )
-                        cacheFood(cacheKeyForAi, foodItem) 
+                        cacheFood(cacheKeyForAi, foodItem)
                         saveToHistory(normalizedQuery, actualFoodName, cacheKeyForAi, decision)
                         return FoodResult.Success(foodItem, decision)
                     }
@@ -297,12 +228,12 @@ class FoodRepository private constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Gemini AI call failed, falling back to simple estimation.", e)
         }
-        
+
         Log.w(TAG, "Gemini AI failed or returned no usable data. Falling back to simple AI analysis for: $queryText")
         val simpleResultOnFailure = getSimpleAiAnalysis(queryText, diabetesType)
         if (simpleResultOnFailure is FoodResult.Success) {
             val simpleAiCacheKey = "ai_estimate:${normalizedQuery}:${diabetesType.lowercase()}"
-            cacheFood(simpleAiCacheKey, simpleResultOnFailure.foodItem) 
+            cacheFood(simpleAiCacheKey, simpleResultOnFailure.foodItem)
             saveToHistory(normalizedQuery, simpleResultOnFailure.foodItem.name, simpleAiCacheKey, simpleResultOnFailure.decision)
         }
         return simpleResultOnFailure
@@ -321,17 +252,29 @@ class FoodRepository private constructor(
             }
         """.trimIndent()
     }
-    
+
     fun getHistory(): Flow<List<HistoryEntity>> {
         return database.historyDao().getAllHistory()
+    }
+
+    fun getFavoriteHistoryItems(): Flow<List<HistoryEntity>> { // New method for favorites
+        return database.historyDao().getFavoriteHistory()
     }
 
     suspend fun clearHistory() {
         database.historyDao().clearAll()
     }
 
+    suspend fun getHistoryItem(queryText: String, diabetesType: String): HistoryEntity? {
+        return database.historyDao().findHistoryItem(queryText.lowercase().trim(), diabetesType)
+    }
+
+    suspend fun setFavoriteStatus(id: Long, isFavorite: Boolean) {
+        database.historyDao().setFavoriteStatus(id, isFavorite)
+    }
+
     private suspend fun getCachedFood(key: String): FoodItem? {
-        return database.foodCacheDao().getFoodByKey(key)?.let { foodCacheEntity -> 
+        return database.foodCacheDao().getFoodByKey(key)?.let { foodCacheEntity ->
             FoodItem(
                 name = foodCacheEntity.name,
                 brand = foodCacheEntity.brand,
@@ -351,7 +294,7 @@ class FoodRepository private constructor(
     }
 
     private suspend fun cacheFood(key: String, foodItem: FoodItem) {
-        val entityToCache = FoodCacheEntity( 
+        val entityToCache = FoodCacheEntity(
             key = key,
             name = foodItem.name,
             brand = foodItem.brand,
@@ -368,21 +311,23 @@ class FoodRepository private constructor(
     }
 
     private suspend fun saveToHistory(
-        queryText: String, 
-        actualFoodName: String, 
+        queryText: String,
+        actualFoodName: String,
         matchedKey: String?,
-        decision: FoodDecisionLogic.FoodDecision
+        decision: FoodDecisionLogic.FoodDecision,
+        isFavoriteForNewItem: Boolean = false // Default to false for new items
     ) {
         val normalizedQueryForHistory = queryText.lowercase().trim()
         val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQueryForHistory, decision.diabetesType)
 
         if (existingHistoryItem != null) {
+            // Update existing: only display name, timestamp. Favorite status is NOT changed here.
             database.historyDao().updateHistoryItem(existingHistoryItem.id, actualFoodName, System.currentTimeMillis(), decision.diabetesType)
-            Log.d(TAG, "Updated history item: $actualFoodName for query: $normalizedQueryForHistory")
+            Log.d(TAG, "Updated history item: $actualFoodName for query: $normalizedQueryForHistory. Favorite status (${existingHistoryItem.isFavorite}) preserved.")
         } else {
             val history = HistoryEntity(
                 queryText = normalizedQueryForHistory,
-                displayName = actualFoodName, 
+                displayName = actualFoodName,
                 diabetesType = decision.diabetesType,
                 matchedKey = matchedKey,
                 suitability = decision.category,
@@ -390,18 +335,19 @@ class FoodRepository private constructor(
                 portionText = decision.portionText,
                 alternativesJson = decision.alternatives.joinToString(","),
                 sourcesUsed = decision.source,
-                createdAt = System.currentTimeMillis()
+                createdAt = System.currentTimeMillis(),
+                isFavorite = isFavoriteForNewItem // Use this only for new items
             )
             val count = database.historyDao().getCount()
             if (count >= Constants.MAX_HISTORY_SIZE) {
-                database.historyDao().deleteOldest(count - Constants.MAX_HISTORY_SIZE + 1) 
+                database.historyDao().deleteOldest(count - Constants.MAX_HISTORY_SIZE + 1)
             }
             database.historyDao().insertHistory(history)
-            Log.d(TAG, "Saved new history item: $actualFoodName for query: $normalizedQueryForHistory")
+            Log.d(TAG, "Saved new history item: $actualFoodName for query: $normalizedQueryForHistory. Favorite: $isFavoriteForNewItem")
         }
     }
-    
-     private fun createGeminiClient(): GeminiApi {
+
+    private fun createGeminiClient(): GeminiApi {
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }
@@ -418,14 +364,14 @@ class FoodRepository private constructor(
     }
 
     private suspend fun getSimpleAiAnalysis(
-        foodNameQuery: String, 
+        foodNameQuery: String,
         diabetesType: String
-    ): FoodRepository.FoodResult {
+    ): FoodResult {
         Log.d(TAG, "Using simple AI estimation for: $foodNameQuery, Type: $diabetesType")
         val actualFoodName = foodNameQuery.capitalize()
         val foodItem = FoodItem(
-            name = actualFoodName, 
-            carbs100g = 15f, 
+            name = actualFoodName,
+            carbs100g = 15f,
             sugars100g = 5f,
             fiber100g = 2f,
             source = "AI_ESTIMATE"
@@ -450,17 +396,16 @@ class FoodRepository private constructor(
         @Volatile
         private var INSTANCE: FoodRepository? = null
 
-        fun getInstance(context: Context, database: AppDatabase): FoodRepository { 
+        fun getInstance(context: Context, database: AppDatabase): FoodRepository {
             return INSTANCE ?: synchronized(this) {
-                val instance = FoodRepository(context.applicationContext, database) 
+                val instance = FoodRepository(context.applicationContext, database)
                 INSTANCE = instance
                 instance
             }
         }
-        
+
         fun closeLocalDatabase() {
             INSTANCE?.localFoodDatabase?.close()
-            // Corrected: Use a string literal for the TAG in companion object
             Log.i("FoodRepositoryCompanion", "Requested to close local database through FoodRepository companion.")
         }
     }

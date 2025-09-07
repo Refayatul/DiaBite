@@ -101,12 +101,16 @@ fun HomeScreen(
         }
 
         // Result
-        uiState.decision?.let { decision ->
-            ResultCard(
-                foodItem = uiState.foodItem!!,
-                decision = decision,
-                onClear = { viewModel.clearResult() }
-            )
+        uiState.foodItem?.let { foodItem ->
+            uiState.decision?.let { decision ->
+                ResultCard(
+                    foodItem = foodItem,
+                    decision = decision,
+                    isFavorite = uiState.isCurrentItemFavorite,      // Pass isFavorite state
+                    onToggleFavorite = { viewModel.toggleFavorite() }, // Pass toggle action
+                    onClear = { viewModel.clearResult() }
+                )
+            }
         }
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Favorite // Added Favorite icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
@@ -51,8 +52,8 @@ fun MainApp() {
         factory = MainViewModel.Factory(androidx.compose.ui.platform.LocalContext.current.applicationContext as android.app.Application)
     )
 
-    var selectedItem by remember { mutableStateOf(0) }
-    val items = listOf("Home", "History", "Settings")
+    var selectedItem by remember { mutableStateOf(0) } // Home is 0, Favorites 1, History 2, Settings 3
+    val items = listOf("Home", "Favorites", "History", "Settings") // Added "Favorites"
 
     Scaffold(
         bottomBar = {
@@ -62,8 +63,9 @@ fun MainApp() {
                         icon = {
                             when (index) {
                                 0 -> Icon(Icons.Default.Home, contentDescription = null)
-                                1 -> Icon(Icons.Default.History, contentDescription = null)
-                                2 -> Icon(Icons.Default.Settings, contentDescription = null)
+                                1 -> Icon(Icons.Default.Favorite, contentDescription = null) // Favorites Icon
+                                2 -> Icon(Icons.Default.History, contentDescription = null)
+                                3 -> Icon(Icons.Default.Settings, contentDescription = null)
                             }
                         },
                         label = { Text(item) },
@@ -72,8 +74,9 @@ fun MainApp() {
                             selectedItem = index
                             when (index) {
                                 0 -> navController.navigate("home") { popUpTo("home") { inclusive = true } }
-                                1 -> navController.navigate("history") { popUpTo("home") }
-                                2 -> navController.navigate("settings") { popUpTo("home") }
+                                1 -> navController.navigate("favorites") { popUpTo("home") } // Navigate to Favorites
+                                2 -> navController.navigate("history") { popUpTo("home") }
+                                3 -> navController.navigate("settings") { popUpTo("home") }
                             }
                         }
                     )
@@ -87,12 +90,22 @@ fun MainApp() {
             modifier = Modifier.padding(innerPadding)
         ) {
             composable("home") { HomeScreen(viewModel) }
+            composable("favorites") { // Added FavoritesScreen route
+                FavoritesScreen(
+                    viewModel = viewModel,
+                    onReRunQuery = { historyItem ->
+                        viewModel.reRunQuery(historyItem)
+                        selectedItem = 0 // Select Home tab
+                        navController.navigate("home") { popUpTo("home") { inclusive = true } }
+                    }
+                )
+            }
             composable("history") {
                 HistoryScreen(
                     viewModel = viewModel,
                     onReRunQuery = { historyItem ->
                         viewModel.reRunQuery(historyItem)
-                        selectedItem = 0
+                        selectedItem = 0 // Select Home tab
                         navController.navigate("home") { popUpTo("home") { inclusive = true } }
                     }
                 )

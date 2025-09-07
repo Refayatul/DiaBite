@@ -1,5 +1,6 @@
 package com.rex.diabite.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -16,5 +17,7 @@ data class HistoryEntity(
     val portionText: String,
     val alternativesJson: String, // JSON array of strings
     val sourcesUsed: String, // comma-separated e.g. "OFF,USDA"
-    val createdAt: Long
+    val createdAt: Long,
+    @ColumnInfo(defaultValue = "0") // SQLite uses 0 for false, 1 for true for booleans
+    val isFavorite: Boolean = false
 )
