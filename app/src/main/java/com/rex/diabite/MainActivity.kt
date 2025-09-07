@@ -4,31 +4,31 @@ import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Favorite // Added Favorite icon
+import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.platform.LocalContext
 import com.rex.diabite.network.RetrofitClient
-import com.rex.diabite.ui.*
+import com.rex.diabite.ui.* // Keep existing wildcard for other UI components
+import com.rex.diabite.ui.HomeScreen // Explicit import for HomeScreen
 import com.rex.diabite.ui.theme.DiaBiteTheme
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Debug: Check if BuildConfig is working
         Log.d("BuildConfigTest", "FDC_API_KEY: ${com.rex.diabite.BuildConfig.FDC_API_KEY}")
-
-        // Test API connectivity
         testApiConnectivity()
 
         setContent {
@@ -44,16 +44,16 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MainApp() {
-    val navController = rememberNavController()
     val viewModel: MainViewModel = androidx.lifecycle.viewmodel.compose.viewModel(
-        factory = MainViewModel.Factory(androidx.compose.ui.platform.LocalContext.current.applicationContext as android.app.Application)
+        factory = MainViewModel.Factory(LocalContext.current.applicationContext as android.app.Application)
     )
 
-    var selectedItem by remember { mutableStateOf(0) } // Home is 0, Favorites 1, History 2, Settings 3
-    val items = listOf("Home", "Favorites", "History", "Settings") // Added "Favorites"
+    val items = listOf("Home", "Favorites", "History", "Settings")
+    val pagerState = rememberPagerState { items.size }
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         bottomBar = {
@@ -62,21 +62,19 @@ fun MainApp() {
                     NavigationBarItem(
                         icon = {
                             when (index) {
-                                0 -> Icon(Icons.Default.Home, contentDescription = null)
-                                1 -> Icon(Icons.Default.Favorite, contentDescription = null) // Favorites Icon
-                                2 -> Icon(Icons.Default.History, contentDescription = null)
-                                3 -> Icon(Icons.Default.Settings, contentDescription = null)
+                                0 -> Icon(Icons.Default.Home, contentDescription = item)
+                                1 -> Icon(Icons.Default.Favorite, contentDescription = item)
+                                2 -> Icon(Icons.Default.History, contentDescription = item)
+                                3 -> Icon(Icons.Default.Settings, contentDescription = item)
                             }
                         },
                         label = { Text(item) },
-                        selected = selectedItem == index,
+                        selected = pagerState.currentPage == index,
                         onClick = {
-                            selectedItem = index
-                            when (index) {
-                                0 -> navController.navigate("home") { popUpTo("home") { inclusive = true } }
-                                1 -> navController.navigate("favorites") { popUpTo("home") } // Navigate to Favorites
-                                2 -> navController.navigate("history") { popUpTo("home") }
-                                3 -> navController.navigate("settings") { popUpTo("home") }
+                            if (pagerState.currentPage != index) {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(index)
+                                }
                             }
                         }
                     )
@@ -84,38 +82,37 @@ fun MainApp() {
             }
         }
     ) { innerPadding ->
-        NavHost(
-            navController = navController,
-            startDestination = "home",
-            modifier = Modifier.padding(innerPadding)
-        ) {
-            composable("home") { HomeScreen(viewModel) }
-            composable("favorites") { // Added FavoritesScreen route
-                FavoritesScreen(
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier.padding(innerPadding),
+            // userScrollEnabled = false, // TODO: Consider if you want to disable direct swipe for now if other issues arise
+        ) { page ->
+            when (page) {
+                0 -> HomeScreen(viewModel)
+                1 -> FavoritesScreen(
                     viewModel = viewModel,
                     onReRunQuery = { historyItem ->
                         viewModel.reRunQuery(historyItem)
-                        selectedItem = 0 // Select Home tab
-                        navController.navigate("home") { popUpTo("home") { inclusive = true } }
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(0) // Navigate to Home (page 0)
+                        }
                     }
                 )
-            }
-            composable("history") {
-                HistoryScreen(
+                2 -> HistoryScreen(
                     viewModel = viewModel,
                     onReRunQuery = { historyItem ->
                         viewModel.reRunQuery(historyItem)
-                        selectedItem = 0 // Select Home tab
-                        navController.navigate("home") { popUpTo("home") { inclusive = true } }
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(0) // Navigate to Home (page 0)
+                        }
                     }
                 )
+                3 -> SettingsScreen(viewModel)
             }
-            composable("settings") { SettingsScreen(viewModel) }
         }
     }
 }
 
-// Test function to verify API connectivity
 fun testApiConnectivity() {
     try {
         val offClient = RetrofitClient.createOffClient()

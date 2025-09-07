@@ -1,24 +1,26 @@
 package com.rex.diabite.ui
 
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.Favorite
-import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-// import androidx.compose.ui.text.style.TextDecoration // No longer needed
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.rex.diabite.domain.FoodDecisionLogic
 import com.rex.diabite.model.FoodItem
 import com.rex.diabite.ui.theme.*
+import com.rex.diabite.ui.theme.StarYellow // Added import for StarYellow
 import com.rex.diabite.util.toDaysAgo
 
 @Composable
@@ -35,7 +37,8 @@ fun ResultCard(
             .fillMaxWidth()
             .padding(bottom = 16.dp),
         shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant) // Slightly different background for ResultCard
     ) {
         Column(
             modifier = Modifier.padding(16.dp)
@@ -49,7 +52,8 @@ fun ResultCard(
                     Text(
                         text = foodItem.name,
                         style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant // Ensure text color contrasts with surfaceVariant
                     )
                     foodItem.brand?.let {
                         brand ->
@@ -61,11 +65,22 @@ fun ResultCard(
                     }
                 }
                 IconButton(onClick = onToggleFavorite) {
-                    Icon(
-                        imageVector = if (isFavorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
-                        contentDescription = if (isFavorite) "Remove from favorites" else "Add to favorites",
-                        tint = if (isFavorite) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Crossfade(targetState = isFavorite, animationSpec = tween(300), label = "ResultFavoriteStar") {
+                        favStatus ->
+                        if (favStatus) {
+                            Icon(
+                                imageVector = Icons.Filled.Star,
+                                contentDescription = "Remove from favorites",
+                                tint = StarYellow 
+                            )
+                        } else {
+                            Icon(
+                                imageVector = Icons.Outlined.StarBorder,
+                                contentDescription = "Add to favorites",
+                                tint = MaterialTheme.colorScheme.secondary // Use secondary for outlined star
+                            )
+                        }
+                    }
                 }
             }
 
@@ -94,14 +109,15 @@ fun ResultCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // Nutritional Info - ensure color contrasts with surfaceVariant
             foodItem.carbs100g?.let {
-                Text("Carbs: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium)
+                Text("Carbs: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             foodItem.sugars100g?.let {
-                Text("Sugars: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium)
+                Text("Sugars: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             foodItem.fiber100g?.let {
-                Text("Fiber: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium)
+                Text("Fiber: ${String.format("%.1f", it)}g per 100g", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -109,20 +125,23 @@ fun ResultCard(
             Text(
                 text = "Net Carbs: ${String.format("%.1f", foodItem.netCarbsPer100g)}g per 100g",
                 style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text(decision.portionText, style = MaterialTheme.typography.bodyMedium)
+            Text(decision.portionText, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Text(
                 text = "Alternatives:",
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary // Use primary color for this title
             )
+            Spacer(modifier = Modifier.height(4.dp))
             decision.alternatives.forEach { alternative ->
                 Row(
                     modifier = Modifier
@@ -134,31 +153,32 @@ fun ResultCard(
                     Text(
                         text = "• $alternative",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.primary, // Keep primary for clickable alternative text
                         modifier = Modifier.weight(1f)
                     )
                     Icon(
                         imageVector = Icons.Filled.ChevronRight,
                         contentDescription = "Analyze $alternative",
-                        tint = MaterialTheme.colorScheme.primary
+                        tint = MaterialTheme.colorScheme.primary // Keep primary for chevron
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically // Align items vertically
             ) {
                 Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
+                    color = MaterialTheme.colorScheme.tertiaryContainer, // Use tertiary container for source badge
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text(
                         text = foodItem.source,
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -169,13 +189,13 @@ fun ResultCard(
                 )
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
+            TextButton(
                 onClick = onClear,
                 modifier = Modifier.align(Alignment.End)
             ) {
-                Text("Clear")
+                Text("Clear Result", color = MaterialTheme.colorScheme.secondary) // Changed to TextButton and styled
             }
         }
     }

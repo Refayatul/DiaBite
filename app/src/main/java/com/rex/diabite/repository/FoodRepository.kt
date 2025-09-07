@@ -48,9 +48,8 @@ class FoodRepository private constructor(
         onAiAnalysisStart: (() -> Unit)? = null // Callback for AI start
     ): FoodResult {
         val normalizedQuery = query.lowercase().trim()
-        Log.d(TAG, "Searching for food: $normalizedQuery, Diabetes Type: $diabetesType")
+        Log.d(TAG, "Searching for food by name: $normalizedQuery, Diabetes Type: $diabetesType")
 
-        // ... (existing cache, local DB, USDA checks remain the same)
         val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType)
         if (existingHistoryItem != null) {
             Log.d(TAG, "Found in history: ${existingHistoryItem.displayName}. Checking Room cache via matchedKey.")
@@ -113,21 +112,19 @@ class FoodRepository private constructor(
             Log.e(TAG, "USDA search exception: ${e.message}", e)
         }
 
-        Log.d(TAG, "Not found in USDA. Trying Gemini AI for query: $query")
-        // Pass the callback to getAiFoodAnalysis
+        Log.d(TAG, "Not found in USDA. Trying Gemini AI for name query: $query")
         return getAiFoodAnalysis(query, diabetesType, onAiAnalysisStart)
     }
 
     suspend fun getFoodByBarcode(
         barcode: String,
         diabetesType: String,
-        useStaging: Boolean = false
-        // If barcode search might lead to AI in the future, add onAiAnalysisStart here too
+        useStaging: Boolean = false,
+        onAiAnalysisStart: (() -> Unit)? = null // Added callback for AI start
     ): FoodResult {
         val normalizedBarcode = barcode.lowercase().trim()
         Log.d(TAG, "Searching for barcode: $normalizedBarcode, Diabetes Type: $diabetesType")
 
-        // ... (existing logic for barcode search)
         val existingHistoryItem = database.historyDao().findHistoryItem(normalizedBarcode, diabetesType)
         if (existingHistoryItem != null) {
             Log.d(TAG, "Found barcode in history: ${existingHistoryItem.displayName}. Checking cache.")
@@ -151,19 +148,20 @@ class FoodRepository private constructor(
             return FoodResult.Success(cachedFromDirectKey, decision)
         }
         
-        Log.w(TAG, "Food not found for barcode '$barcode' after checking history, cache, and (commented out) OFF API.")
-        return FoodResult.Error("Food not found for barcode '$barcode'")
+        Log.d(TAG, "Barcode not found in cache/history. Trying Gemini AI for barcode: $barcode")
+        return getAiFoodAnalysis(barcode, diabetesType, onAiAnalysisStart) // Fallback to AI
     }
 
     private suspend fun getAiFoodAnalysis(
-        queryText: String,
+        queryText: String, // Can be food name or barcode
         diabetesType: String,
-        onAiAnalysisStart: (() -> Unit)? = null // Accept callback here
+        onAiAnalysisStart: (() -> Unit)? = null
     ): FoodResult {
         val normalizedQuery = queryText.lowercase().trim()
+        // Cache key for AI results should be distinct for name vs barcode if prompt is different
+        // For now, using a generic queryText, assuming prompt handles name/barcode distinction
         val cacheKeyForAi = "ai:${normalizedQuery}:${diabetesType.lowercase()}"
 
-        // ... (existing cache checks for AI results remain the same)
         val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQuery, diabetesType)
         if (existingHistoryItem != null && existingHistoryItem.sourcesUsed.contains("AI")) {
             Log.d(TAG, "Found in history AI analysis for: ${existingHistoryItem.displayName}. Checking cache.")
@@ -186,19 +184,19 @@ class FoodRepository private constructor(
             return FoodResult.Success(cachedAiFoodItem, decision)
         }
 
-
-        Log.d(TAG, "No valid cached AI result. Calling Gemini API for: $queryText")
-        onAiAnalysisStart?.invoke() // Invoke callback before the try block for network call
+        Log.d(TAG, "No valid cached AI result. Calling Gemini API for query: $queryText")
+        onAiAnalysisStart?.invoke()
 
         try {
+            // The prompt might need adjustment if queryText is a barcode vs. a name
+            // For now, using the same prompt and relying on Gemini to interpret.
             val prompt = createPrompt(queryText, diabetesType)
             val request = GeminiRequest(contents = listOf(Content(parts = listOf(Part(prompt)))))
             val apiKey = BuildConfig.GEMINI_API_KEY
 
             if (apiKey.isBlank() || apiKey == "YOUR_GEMINI_API_KEY_HERE") {
-                Log.w(TAG, "Gemini API key not configured. Falling back to simple AI analysis.")
-                // onAiAnalysisStart was already called, this is just a fallback *result*
-                val simpleResult = getSimpleAiAnalysis(queryText, diabetesType) // This function now just returns result
+                Log.w(TAG, "Gemini API key not configured. Falling back to simple AI analysis for query: $queryText")
+                val simpleResult = getSimpleAiAnalysis(queryText, diabetesType)
                 if (simpleResult is FoodResult.Success) {
                     val simpleAiCacheKey = "ai_estimate:${normalizedQuery}:${diabetesType.lowercase()}"
                     cacheFood(simpleAiCacheKey, simpleResult.foodItem)
@@ -217,8 +215,11 @@ class FoodRepository private constructor(
                     val aiResponse = jsonAdapter.fromJson(cleanedJson)
 
                     if (aiResponse != null) {
-                        val actualFoodName = queryText.capitalize()
-                        val foodItem = FoodItem(name = actualFoodName, source = "AI") // Source is "AI"
+                        // If queryText was a barcode, the actualFoodName might be a generic name from AI
+                        // or we might want to display the barcode itself, or try to get product name from AI response.
+                        // For now, using queryText capitalized if it was a barcode.
+                        val actualFoodName = queryText.capitalize() 
+                        val foodItem = FoodItem(name = actualFoodName, source = "AI")
                         val decision = FoodDecisionLogic.FoodDecision(
                             category = aiResponse.category,
                             reason = aiResponse.reason,
@@ -227,19 +228,18 @@ class FoodRepository private constructor(
                             source = "AI",
                             diabetesType = diabetesType
                         )
-                        cacheFood(cacheKeyForAi, foodItem)
+                        cacheFood(cacheKeyForAi, foodItem) // Cache with the original query (barcode or name)
                         saveToHistory(normalizedQuery, actualFoodName, cacheKeyForAi, decision)
                         return FoodResult.Success(foodItem, decision)
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Gemini AI call failed, falling back to simple estimation.", e)
+            Log.e(TAG, "Gemini AI call failed for query: $queryText. Falling back.", e)
         }
 
-        // Fallback to simple estimation if API call failed or returned no data
-        Log.w(TAG, "Gemini AI failed or returned no usable data. Falling back to simple AI analysis for: $queryText")
-        val simpleResultOnFailure = getSimpleAiAnalysis(queryText, diabetesType) // This function now just returns result
+        Log.w(TAG, "Gemini AI failed or no usable data for $queryText. Falling back to simple AI analysis.")
+        val simpleResultOnFailure = getSimpleAiAnalysis(queryText, diabetesType)
         if (simpleResultOnFailure is FoodResult.Success) {
             val simpleAiCacheKey = "ai_estimate:${normalizedQuery}:${diabetesType.lowercase()}"
             cacheFood(simpleAiCacheKey, simpleResultOnFailure.foodItem)
@@ -248,11 +248,13 @@ class FoodRepository private constructor(
         return simpleResultOnFailure
     }
 
-    private fun createPrompt(foodName: String, diabetesType: String): String {
-        // ... (prompt creation remains the same)
+    private fun createPrompt(foodQuery: String, diabetesType: String): String {
+        // Consider if prompt needs to be different for a barcode query vs a name query.
+        // For now, assuming Gemini can handle a barcode number as a food identifier.
         return """
             You are a nutrition assistant focusing on diabetes-friendly guidance.
-            Food: $foodName, DiabetesType: $diabetesType.
+            Food Query (this could be a food name or a product barcode): $foodQuery, DiabetesType: $diabetesType.
+            If the Food Query is a barcode, try to identify the product and provide its nutritional analysis.
             Return JSON ONLY in this format:
             {
               "category": "SAFE" | "SMALL_PORTION" | "LIMIT" | "AVOID" | "UNKNOWN",
@@ -263,7 +265,6 @@ class FoodRepository private constructor(
         """.trimIndent()
     }
 
-    // Simplified getSimpleAiAnalysis to just create the result, not call callbacks
     private fun getSimpleAiAnalysis(
         foodNameQuery: String,
         diabetesType: String
@@ -309,7 +310,6 @@ class FoodRepository private constructor(
     }
 
     private suspend fun getCachedFood(key: String): FoodItem? {
-        // ... (implementation remains the same)
         return database.foodCacheDao().getFoodByKey(key)?.let { foodCacheEntity ->
             FoodItem(
                 name = foodCacheEntity.name,
@@ -326,12 +326,10 @@ class FoodRepository private constructor(
     }
 
     private fun isCacheValid(foodItem: FoodItem): Boolean {
-        // ... (implementation remains the same)
         return System.currentTimeMillis() - foodItem.updatedAt < Constants.CACHE_TTL_MILLIS
     }
 
     private suspend fun cacheFood(key: String, foodItem: FoodItem) {
-        // ... (implementation remains the same)
         val entityToCache = FoodCacheEntity(
             key = key,
             name = foodItem.name,
@@ -355,7 +353,6 @@ class FoodRepository private constructor(
         decision: FoodDecisionLogic.FoodDecision,
         isFavoriteForNewItem: Boolean = false 
     ) {
-        // ... (implementation remains the same)
         val normalizedQueryForHistory = queryText.lowercase().trim()
         val existingHistoryItem = database.historyDao().findHistoryItem(normalizedQueryForHistory, decision.diabetesType)
 
@@ -386,7 +383,6 @@ class FoodRepository private constructor(
     }
 
     private fun createGeminiClient(): GeminiApi {
-        // ... (implementation remains the same)
         val logging = HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BODY
         }

@@ -77,3 +77,4 @@ val SmallPortionYellow = Color(0xFFFFEB3B)
 val LimitOrange = Color(0xFFFF9800)
 val AvoidRed = Color(0xFFF44336)
 val UnknownGray = Color(0xFF9E9E9E)
+val StarYellow = Color(0xFFFFD700) // Gold-like yellow for star icons

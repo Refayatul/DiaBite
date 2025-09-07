@@ -93,11 +93,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             try {
                 val result: FoodRepository.FoodResult = if (currentBarcode.isNotBlank()) {
                     Log.d(TAG, "Analyzing by barcode: $currentBarcode")
-                    // Barcode search currently does not have an AI step, so no onAiAnalysisStart needed here
                     repository.getFoodByBarcode(
                         barcode = currentBarcode,
                         diabetesType = currentDiabetesType,
-                        useStaging = _uiState.value.useStaging
+                        useStaging = _uiState.value.useStaging,
+                        onAiAnalysisStart = { 
+                            _uiState.value = _uiState.value.copy(isAnalysingWithAi = true)
+                            Log.d(TAG, "AI analysis started for barcode, updating UI state.")
+                        }
                     )
                 } else if (currentFoodName.isNotBlank()) {
                     Log.d(TAG, "Analyzing by name: $currentFoodName")
@@ -106,8 +109,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         diabetesType = currentDiabetesType,
                         useStaging = _uiState.value.useStaging,
                         onAiAnalysisStart = { 
-                            _uiState.value = _uiState.value.copy(isAnalysingWithAi = true) 
-                            Log.d(TAG, "AI analysis started, updating UI state.")
+                            _uiState.value = _uiState.value.copy(isAnalysingWithAi = true)
+                            Log.d(TAG, "AI analysis started for name, updating UI state.")
                         }
                     )
                 } else {
@@ -130,7 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             foodItem = result.foodItem,
                             decision = result.decision,
                             error = null,
-                            isAnalysingWithAi = false // Reset AI flag on success
+                            isAnalysingWithAi = false 
                         )
                         val queryKeyForHistory = if (currentBarcode.isNotBlank()) currentBarcode else currentFoodName
                         updateUiWithHistoryItemDetails(queryKeyForHistory.lowercase().trim(), result.decision.diabetesType)
@@ -145,7 +148,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             decision = null,
                             currentHistoryItemId = null,
                             isCurrentItemFavorite = false,
-                            isAnalysingWithAi = false // Reset AI flag on error
+                            isAnalysingWithAi = false 
                         )
                     }
                 }
@@ -158,7 +161,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     decision = null,
                     currentHistoryItemId = null,
                     isCurrentItemFavorite = false,
-                    isAnalysingWithAi = false // Reset AI flag on exception
+                    isAnalysingWithAi = false 
                 )
             }
         }
@@ -173,13 +176,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 try {
                     repository.setFavoriteStatus(itemId, newFavoriteStatus)
                     _uiState.value = _uiState.value.copy(isCurrentItemFavorite = newFavoriteStatus)
-                    Log.d(TAG, "Toggled favorite for item $itemId to $newFavoriteStatus")
+                    Log.d(TAG, "Toggled favorite for item $itemId (via HomeScreen) to $newFavoriteStatus")
+                    // No need to explicitly reload history/favorites here, Flows should update them.
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error toggling favorite for item $itemId", e)
+                    Log.e(TAG, "Error toggling favorite for item $itemId (via HomeScreen)", e)
                 }
             }
         } else {
-            Log.w(TAG, "Attempted to toggle favorite, but no currentHistoryItemId is set.")
+            Log.w(TAG, "Attempted to toggle favorite (via HomeScreen), but no currentHistoryItemId is set.")
+        }
+    }
+
+    // New function to toggle favorite from lists
+    fun toggleFavoriteStatusForItem(itemId: Long, currentIsFavorite: Boolean) {
+        val newFavoriteStatus = !currentIsFavorite
+        Log.d(TAG, "Toggling favorite for item $itemId (from list) to $newFavoriteStatus")
+        viewModelScope.launch {
+            try {
+                repository.setFavoriteStatus(itemId, newFavoriteStatus)
+                // The history and favorites Flows will automatically update the lists.
+                // If _uiState.currentHistoryItemId matches itemId, update its favorite status too.
+                if (_uiState.value.currentHistoryItemId == itemId) {
+                    _uiState.value = _uiState.value.copy(isCurrentItemFavorite = newFavoriteStatus)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error toggling favorite for item $itemId (from list)", e)
+                // Potentially show an error to the user via a different state if needed
+            }
         }
     }
 
@@ -191,7 +214,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             error = null,
             currentHistoryItemId = null,
             isCurrentItemFavorite = false,
-            isAnalysingWithAi = false // Also clear AI flag here
+            isAnalysingWithAi = false 
         )
     }
 
@@ -219,21 +242,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         Log.d(TAG, "Clearing history")
         viewModelScope.launch {
             repository.clearHistory()
-            _favorites.value = emptyList() 
+            // The history and favorites flows will emit empty lists
         }
     }
 
     fun reRunQuery(historyItem: HistoryEntity) {
         Log.d(TAG, "Re-running query: ${historyItem.queryText}")
         _uiState.value = _uiState.value.copy(
-            foodName = historyItem.queryText,
-            barcode = "", 
+            foodName = if (historyItem.matchedKey?.startsWith("barcode:") == true || historyItem.matchedKey?.startsWith("ai:${historyItem.queryText.lowercase().trim()}") == true && historyItem.queryText.all { Character.isDigit(it) } ) "" else historyItem.queryText,
+            barcode = if (historyItem.matchedKey?.startsWith("barcode:") == true || historyItem.matchedKey?.startsWith("ai:${historyItem.queryText.lowercase().trim()}") == true && historyItem.queryText.all { Character.isDigit(it) } ) historyItem.queryText else "",
             diabetesType = historyItem.diabetesType,
-            currentHistoryItemId = historyItem.id,
-            isCurrentItemFavorite = historyItem.isFavorite,
+            currentHistoryItemId = historyItem.id, // Keep track of the original item id
+            isCurrentItemFavorite = historyItem.isFavorite, // Preserve favorite status from history
             isLoading = true, 
             error = null,
-            isAnalysingWithAi = false // Reset AI flag for re-run
+            isAnalysingWithAi = false 
         )
         analyzeFood()
     }
@@ -249,7 +272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val error: String? = null,
         val currentHistoryItemId: Long? = null,      
         val isCurrentItemFavorite: Boolean = false,
-        val isAnalysingWithAi: Boolean = false // Added for AI loading indicator
+        val isAnalysingWithAi: Boolean = false 
     )
 
     class Factory(private val application: Application) : ViewModelProvider.Factory {
